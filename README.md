@@ -37,3 +37,6 @@ Write a program to simulate the producer and consumer. Your factory output shoul
     As soon as consumer generated the water molecule, generated molecule get pushed into queue named `water-producer`.
     and in batcchProduction.js the consumer of that queue stores the generated water molecules and prints the water molecules in the batch of 10 after every 1 sec
 
+## Approach
+created 2 queues for Hydrogen and oxygen (pipeline), used fanout exchange to broadcast atoms to consumers, created 50 consumers who are listing to broadcast message.
+and each consumer has factory unit (1 worker thread)
