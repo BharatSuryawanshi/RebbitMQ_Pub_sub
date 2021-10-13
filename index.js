@@ -1,71 +1,96 @@
-const chalk = require("chalk");
-const {
-    Worker
-} = require('worker_threads');
 const amqp = require('amqplib');
+require('./waterMoleculeProduction')
+const startHydrogenProduction = require('./atomsProduction/hydrogenProduction').init;
+const startOxygenProduction = require('./atomsProduction/oxygenProduction').init;
+const chalk = require("chalk");
 
-const init = async () => {
+const exchange = 'provideAtomsToUnit'
 
-    // creating queue to send generated water molecule to printer
+let connectionForExchange;
+let channelForExchange;
+async function init() {
+
+    connectionForExchange = await amqp.connect('amqp://localhost')
+
+    channelForExchange = await connectionForExchange.createChannel()
+
+    channelForExchange.assertExchange(exchange, 'fanout', {
+        durable: false
+    });
+
+}
+
+const joinHydrogenPipeline = async () => {
     const connection = await amqp.connect('amqp://localhost')
 
     const channel = await connection.createChannel()
 
-    const queueName = "water-producer"
+    const queueName = "hydrogen-atom-pipeline"
 
     channel.assertQueue(queueName, {
         durable: false
     });
 
+    channel.consume(queueName, (msg) => {
 
-    let ho2ModuleCount = 0;
-    let hModuleCount = 0;
-    let oModuleCount = 0;
-
-    let hydrogenPipeline = Array(500).fill('H');
-    let oxygenPipeline = Array(500).fill('O');
-
-    const producer = new Worker('./producer.js');
-    producer.on('message', ({
-        h,
-        o
-    }) => {
-        hModuleCount += 2;
-        oModuleCount++
-        console.log(chalk.red.bold(`Produce H Module : ${hModuleCount} : ${h}`));
-        console.log(chalk.red.bold(`Produce O Module : ${oModuleCount} : ${o}`));
-        hydrogenPipeline = hydrogenPipeline.concat(h);
-        oxygenPipeline = oxygenPipeline.concat(o);
-    });
-
-    const consumers = Array(50);
-
-    for (let i = 0; i < consumers.length; i++) {
-        consumers[i] = new Worker('./consumer.js');
-        consumers[i].on('message', ({
-            result
-        }) => {
-            ho2ModuleCount++
-
-            postToConsumer(consumers[i])
-
-            // sending generated water molecules via queue to print data in batch of 10 after each 1 sec
-            channel.sendToQueue(queueName, Buffer.from(JSON.stringify(`Consume H2O Module : ${ho2ModuleCount} : ${result}`)));
-
-            producer.postMessage('add h and o');
-        });
-
-        postToConsumer(consumers[i])
-
-    }
-
-    function postToConsumer(consumer) {
-        consumer.postMessage({
-            h1: hydrogenPipeline.pop(),
-            h2: hydrogenPipeline.pop(),
-            o1: oxygenPipeline.pop()
-        });
-    }
+        broadcast(JSON.parse(msg.content.toString('utf8')), null)
+        channel.ack(msg)
+    
+    })
 }
 
-init();
+const joinOxygenPipeline = async () => {
+    const connection = await amqp.connect('amqp://localhost')
+
+    const channel = await connection.createChannel()
+
+    const queueName = "oxygen-atom-pipeline"
+
+    channel.assertQueue(queueName, {
+        durable: false
+    });
+
+    channel.consume('oxygen-atom-pipeline', (msg) => {
+
+        broadcast(null, JSON.parse(msg.content.toString('utf8')))
+        channel.ack(msg)
+
+    })
+}
+
+console.log(chalk.red.bold('Water Molecule Production has been Started .... Please wait '));
+
+init()
+
+
+startHydrogenProduction();
+startOxygenProduction()
+joinHydrogenPipeline();
+joinOxygenPipeline();
+
+
+let hydrogenBatch = [];
+let oxygenBatch = [];
+
+function broadcast(hydrogen, oxygen) {
+
+    if (hydrogen) {
+        hydrogenBatch.push(hydrogen);
+    }
+
+    if (oxygen) {
+        oxygenBatch.push(oxygen);
+    }
+    if (hydrogenBatch.length == 100 & oxygenBatch.length == 50) {
+        channelForExchange.publish(exchange, '', Buffer.from(JSON.stringify({
+            data: {
+                hydrogen: hydrogenBatch,
+                oxygen: oxygenBatch
+            }
+        })));
+
+        hydrogenBatch = []
+        oxygenBatch = []
+    }
+
+}
