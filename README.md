@@ -1,4 +1,4 @@
-# somish_lab
+# RebbitMQ_Pub_sub
 
 Problem statement
 
